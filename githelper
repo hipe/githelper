@@ -1,0 +1,168 @@
+#!/usr/bin/env ruby
+
+# This puppy is intended to be a standalone command line script written in ruby
+# with useful features that are not out-of-the-box available for git -- Features like
+# "add all files that haven't been added yet" or "add all files that have been modified"
+# or "do an equivalent of svn-info."
+#
+# For example:
+#   githelper show untracked 
+#   githelper add untracked 
+#   githelper show modified 
+#   githelper add modified
+#   githelper show both
+#   githelper add both
+#   githelper help
+#   githelper version
+# 
+#  Just for fun, the noun phrases and verbs and adjectives can appear in any order
+#
+require 'pp'
+
+def ppp symbol, object=nil, die=nil
+  unless (symbol.instance_of?(Symbol) || symbol.instance_of?(String))
+    die = object
+    object = symbol
+    symbol = 'YOUR VALUE'
+  end
+  
+  puts spp(symbol, object)
+  if die
+    exit
+  end
+end
+
+# PrettyPrint.pp() that returns a string instead (like puts) of print to standard out, 
+# like sprintf() is to printf().  prints info about where it was called from.
+def spp label, object
+  # go backwards up the call stack, skipping caller methods we don't care about (careful!)
+  # this is intended to show us the last interesting place from which this was called.
+  i = line = methname = nil
+  caller.each_with_index do |line,index|
+    matches = /`([^']+)'$/.match(line)
+    break if (matches.nil?) # almost always the last line of the stack -- the calling file name
+    matched = /(?:\b|_)(?:log|ppp|spp)(?:\b|_)/ =~ matches[1]
+    break unless matched
+  end
+  m = /^(.+):(\d+)(?::in `(.+)')?$/.match line
+  raise CliException.new(%{oops failed to make sense of "#{line}"}) unless m
+  path,line,meth = m[1],m[2],m[3]
+  file = File.basename(path)
+  PP.pp object, obj_buff=''
+  
+  # location = "(at #{file}:#{meth}:#{line})"
+  location ="(at #{file}:#{line})"        
+  if (location == @last_location)
+    location = nil
+  else 
+    @last_location = location
+  end
+  
+  buff = '';
+  buff << label.to_s + ': ' if label
+  buff << location if location
+  buff << "\n" if (/\n/ =~ obj_buff)
+  buff << obj_buff
+  buff
+end
+
+module Hipe
+  class GorillaGrammarParseFailure < Exception
+  end
+  class GorillaGrammar
+    def initialize grammar
+      #@states = {}
+      #@mode = :token  # :token | :argument
+      #grammar[:verbs].each do |verb_words,value|
+      #  first_word = verb_words.shift
+      #  @states[first_word] ||= {}
+      #  current_node = @states[first_word]
+      #  while (next_word=verb_words.shift)
+      #    current_node[next_word] ||= {}
+      #    current_node = current_node[next_word]
+      #  end
+      #  raise Exception.new("no") if current_node['']
+      #  current_node[''] = '[action]'
+      #end # each verb
+    end # def initialize
+    
+    def parse input_list
+      x = _parse({:branch => @states, :input_list=>input_list})
+      ppp "wtf to do now?", x, 1
+    end
+    
+    def _parse(stuff)
+      common_keys = stuff[:branch].keys & stuff[:input_list]
+      if (common_keys.size == 0)
+        return false
+      end
+      possibilities = []
+      common_keys.each do |k|
+        thing = { :i => stuff[:input_list].index(k) }
+        thing[:input_list] = stuff[:input_list].clone
+        thing[:input_list].delete(k)
+        thing[:branch] = stuff[:branch][k]
+        possibilities << thing
+      end
+        
+      ppp :pb, possibilities, 1
+
+  #   case common_keys.size
+  #     when 0 then raise GorillaGrammarParseFailure.new("sorry -- couldn't find verb")
+  #     when 1
+  #     else
+  #       
+  #   ppp :ck, common_keys, 1
+  #   
+  #
+
+    end # def parse
+  end # class GorillaGrammar
+end
+
+pp $PROGRAM_NAME
+if File.basename($PROGRAM_NAME) == File.basename(__FILE__)
+  grammar = Hipe::GorillaGrammar.new({
+    :verbs => {
+      ['make','this'] => {
+        :modifiers => {
+          ['with','that'] => true, 
+          ['with','the', 'other'] => true
+        } 
+      },
+      ['make','that'] => {
+        :modifiers => {
+          ['now'] => true
+        }
+      },
+#     ['say', 'this', 'word', :this] => {
+#       :modifiers => {
+#         ['to', :who] => true
+#       }
+#     },
+#     ['say', 'something'] => {
+#       :modifiers => { 'xxxx'=>'blah' }
+#     },
+      ['run'] => {
+      }
+    }
+  })
+  pp grammar
+  
+  puts "\n\n\n\n"
+  
+  parse_tree = grammar.parse(['say','this','word','run'])
+  if false
+    puts "failed 1" if parse_tree != {
+      :verb => :say,
+      :arguments => {
+        :this => 'beavis'
+      }
+    }
+  end
+  
+end
+
+
+
+
