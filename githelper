@@ -29,58 +29,130 @@ module Hipe
     class UsageFailure < Exception; end  
 
     class ParseFailure < Exception; end  
-  
-    class NonTerminal
-      def initialize data, extra
-        @data = data
-        @extra = extra
+    
+    module RegexpTerminal
+      # if a regexp looks like /^(alpha|beta|gamma)$/ then describe it as {alpha|beta|gamma}
+      def describe
+        s = to_s
+        if (m = %r{\(\?-mix:\^\(([^\)]+)\)\$\)}.match(s))
+          %<{#{m[1]}}>
+        else
+          s
+        end
       end
       
-      def phrase
-        @data[:phrase]
+      def matches token
+        if (md = self.match(token))
+          md.captures
+        else
+          nil
+        end
       end
       
-      def phrase_to_key list
-        list.map{|x| x.to_s }.join(_).to_sym
-      end
-      
-      # waiting for refactor
-      def capture_names
-        (@extra && @extra[:passthru]) ? 
-          @extra[:passthru][:capture_names].clone :
-          []
-      end
-      
-      def captures
-        return {} if !@extra || !@extra[:passthru]
-        left  = @extra[:passthru][:capture_names]
-        right = @data[:re_captures].flatten
-        Hash[*(left.zip(right).flatten)]
+      attr_accessor :name
+      def name
+        @name.to_s
       end
       
     end
-  
-    class GorillaParse
-      def initialize match
-        @data = match
+    
+    module StringTerminal
+      def describe
+        self
+      end
+      def matches token
+        self == token
+      end
+      def name
+        self
+      end
+    end
+    
+    # can't define singleton / no virtual class for Symbol
+    class SymbolTerminal
+      def initialize(symbol)
+        @internal = symbol
+      end
+      def describe
+        @internal.inspect
+      end
+      def matches token
+        token
+      end
+      def inspect
+        @internal.inspect
+      end
+      def name
+        @internal.to_s
+      end
+    end
+    
+    class NonTerminal
+      def initialize data
+        @phrase = data.delete(:phrase)
+        @data = data
+        (0..@phrase.size-1).each do |index|
+          terminal = @phrase[index]
+          case terminal
+            when Regexp then terminal.extend RegexpTerminal; terminal.name = @data[:names][index]
+            when String then terminal.extend StringTerminal
+            when Symbol then @phrase[index] = SymbolTerminal.new(terminal)
+            else raise UsageFailure.new("invalid type for terminal: "+terminal.class)
+          end
+        end
+      end
+      
+      attr_accessor :phrase
+
+      def self.clone nt
+        # 2009-22-16 04:38 raggi: hipe: maybe you want to look at marshal_dump and marshal_load callbacks
+        Marshal.load(Marshal.dump(nt))
+      end
+      
+      def clean
+        @data.delete(:grammar_index)
+      end
+      
+      def [](i)
+        @data[i]
+      end
+      
+      def []=(i,x)
+        @data[i] = x
       end
             
-      def as_method_name 
-        names = @data[:verb_phrase].capture_names
-        @data[:verb_phrase].phrase.map do |x|
-          if x.instance_of? Regexp
-            names.shift #terrible!
-          else
-            x.to_s 
-          end
-        end.join('_').to_sym
+      def capture_names
+        @phrase.map{|x| x.name.to_sym} 
+      end
+      
+      def captures
+        use_this = []
+        capture_names.each_with_index { |name, index| use_this << name; use_this << @data[:matches][index] }
+        Hash[*use_this]
+      end
+      
+      def describe_accepting_state
+        terminal = @phrase[@data[:grammar_index]]
+        terminal.describe        
+      end
+      
+      def matches(token)
+        @phrase[@data[:grammar_index]].matches(token)
+      end
+    end # class NonTerminal
+  
+    class GorillaParse
+      def initialize verb, modifiers
+        @verb = verb
+        @modifiers = modifiers
+      end
+      
+      attr_reader :verb, :modifiers
+            
+      def as_key
+        @verb.capture_names.map{|x|x.to_s}.join('_').to_sym
       end  
       
-      def name_value_pairs
-        raise Exception.new('implement me') if (@data[:modifiers].count > 0)
-        @data[:verb_phrase].captures
-      end
-
     end # class
     
     class Grammar
@@ -88,44 +160,32 @@ module Hipe
       def initialize grammar
         @grammar = grammar
         @on_ambiguity = :fail; # :get_longest, :return_all, :fail
-        @debug_level = 0
+        @debug_level = 100
       end # def initialize
     
       def parse input_list
-        phrases = @grammar[:verbs].keys
         @on_ambiguity = :get_longest
-        verb_tree = _parse(phrases,input_list)
-        result = {}
-        matching_verb = @grammar[:verbs][verb_tree[:phrase]]
-        result[:verb_phrase] = NonTerminal.new( verb_tree, matching_verb )
-        result[:modifiers] = [] # we were thinking of making it a hash but why not allow multiple of the same? 
-        if (matching_verb[:passthru])
-          result[:passthru] = matching_verb[:passthru]
-        end
-        if (matching_verb[:modifiers])
+        verb_non_terminal = _parse(@grammar[:verbs],input_list)
+        modifier_nts = []
+        if (verb_non_terminal[:modifiers])
           @on_ambiguity = :return_all
-          # if we wanted to be really anal we would parse the first half and second half separately to avoid interference
-          # but it seems like overkill at this early point. and almost never a big deal unless really ambiguous G's
+          # if we wanted to be really anal we would parse the first half and 
+          # second half separately to avoid interference but it seems like overkill at this early point.
+          # and almost never a big deal unless really ambiguous G's
           shrinkme = input_list.clone
-          nillify shrinkme, verb_tree[:i1]..verb_tree[:i2]
-          phrases = matching_verb[:modifiers].keys
-          matches = _parse(phrases,shrinkme)
+          nillify shrinkme, verb_non_terminal[:i1]..verb_non_terminal[:i2]
+          matches = _parse(verb_non_terminal[:modifiers],shrinkme)
           matches.each do |match|
             nillify shrinkme, match[:i1]..match[:i2]
-            result[:modifiers] << NonTerminal.new( match )
+            modifier_nts << match
           end
           if (0<shrinkme.compact!.size)
             raise ParseFailure.new(%{I can't make sense of "#{shrinkme.inspect}"})
           end
         end # end if modifiers existed
-        GorillaParse.new result
+        GorillaParse.new(verb_non_terminal, modifier_nts)
       end
-    
-      def self.to_hash trees
         
-        ppp :trees, trees, 1
-      end
-    
       def nillify from_array, range
         range.each { |x| from_array[x] = nil }
       end
@@ -143,27 +203,28 @@ module Hipe
         return debug(level, true, &block)
       end
     
-      def _parse(phrases,input_list)
-        possibilities = phrases.map do |phrase|
-          {:g     => 0,
-           :i1  => false,
-           :phrase => phrase
-          }
+      def _parse(phrases_data_list,input_list)
+        pz = [] # possibilities as NonTerminal objects
+        phrases_data_list.each do |terminal_symbol_list,freeform_data|
+          freeform_data = {} if (true==freeform_data || 1==freeform_data)
+          freeform_data.merge!(:grammar_index=>0, :i1=>false, :phrase=>terminal_symbol_list)
+          pz << NonTerminal.new(freeform_data)
         end
         begin
-          prev_possibilities = possibilities
-          possibilities = __parse(possibilities, input_list)
-          if (possibilities.size == 0)
-            ppp prev_possibilities
+          prev_pz = pz
+          pz = __parse(pz, input_list)
+          if (pz.size == 0)
             raise ParseFailure.new("parse failure")
-          elsif (possibilities.find_all{|x| x[:matched] }.size == possibilities.size)
-            if (possibilities.size == 1 ) 
-              match = possibilities[0]
+          elsif (pz.find_all{|nt| nt[:matched] }.size == pz.size)
+            if (pz.size == 1 ) 
+              match = pz[0]
               break;
             else
               case @on_ambiguity
                 when :get_longest
-                  lengths = possibilities.map { |x| x[:phrase].length }
+                  p pz,1
+                  
+                  lengths = pz.map { |x| x[:phrase].length }
                   max = lengths.max
                   if (lengths.find_all{|x| x==max}.size > 1)
                     raise UsageFailure.new(
@@ -171,12 +232,11 @@ module Hipe
                     )
                   else
                     index = lengths.find_index(max)
-                    match = possibilities[index]
+                    match = pz[index]
                     break
                   end
                when :return_all
-                 match = possibilities # careful
-                 possibilities.each { |it| clean_node(it) }
+                 match = pz # careful
                  break
                when :fail
                  raise UsageFailure.new("Ambiguous grammar!")
@@ -185,10 +245,9 @@ module Hipe
               end
             end
           else # we have at least one ongoing possibility that isn't done
-            #ppp :poss, possibilities
+            #ppp :poss, pz
           end
         end while true
-        clean_node(match) if (match.instance_of? Hash)
         if (:return_all==@on_ambiguity && !match.instance_of?(Array))  # ick
           [match]
         else 
@@ -196,50 +255,35 @@ module Hipe
         end
       end # def parse
 
-      def clean_node(it)
-        it.delete(:g)
-        it.delete(:matched)
-      end
-
-      def __parse(possibilities, input_list)
-        possibilities2 = []      
-        possibilities.each_with_index do |e,i|
-          if e[:matched]
-            possibilities2 << e
-            next
-          end
-          debugs(1){ %{****checking possibility of this phrase: #{e[:phrase].inspect}} }
-          input_list_indexes = e[:i2] ? [e[:i2]] : (0..input_list.size-1).to_a
-          input_list_indexes.each do |i2|
-            e2 = input_list[i2]
-            debug(1){%{checking input word "#{e2}"}}
-            terminal = e[:phrase][e[:g]]
-            debug(1){%{ against terminal symbol #{terminal.inspect} }}
-            if (terminal==e2 || terminal.instance_of?(Symbol) || (terminal.instance_of?(Regexp) && (m=terminal.match(e2))))
-              debug(1){" and adding \n"}
-              p2 = possibilities[i].clone
-              p2[:i1] = i2 unless p2[:i1]
-              if p2[:g] == p2[:phrase].size - 1
-                p2[:matched] = true
-                p2[:i2] = p2[:i1] unless p2[:i2]
-              else
-                p2[:i2] = (p2[:i2]) ? (p2[:i2]+1) : (p2[:i1]+1)
-              end
-              if (terminal.instance_of? Regexp)
-                p2[:re_captures] ||= []
-                p2[:re_captures] << m.captures
-              elsif (terminal.instance_of? Symbol)
-                p2[:captures] ||= {}
-                p2[:captures][terminal] = e2
-              end
-              p2[:g] += 1
-              possibilities2 << p2
-            else
+      def __parse(pz, input_list)
+        result_pz = []      
+        pz.each do |nt|
+          if nt[:matched] then result_pz << NonTerminal.clone(nt); next; end
+          debugs(1){ %{****checking possibility of this phrase: #{nt.phrase.inspect}} }
+          input_list_indexes = nt[:i2] ? [nt[:i2]] : (0..input_list.size-1).to_a
+          input_list_indexes.each do |input_index|
+            token = input_list[input_index]
+            debug(1){%{checking input word "#{token}" against terminal symbol "#{nt.describe_accepting_state}"}}
+            if (!(match_data = nt.matches(token)))
               debug(1){" and not adding\n"}
+            else
+              debug(1){" and adding \n"}
+              nt2 = NonTerminal.clone(nt)
+              nt2[:matches] ||= []
+              nt2[:matches] << match_data          
+              nt2[:i1] = input_index if nt2[:i1] == false
+              if nt2[:grammar_index] == (nt2.phrase.size-1)
+                nt2[:matched] = true
+                nt2[:i2] = nt2[:i1] unless nt2[:i2]
+              else
+                nt2[:i2] = (nt2[:i2]) ? (nt2[:i2]+1) : (nt2[:i1]+1)
+              end
+              nt2[:grammar_index] += 1
+              result_pz << nt2
             end
           end
         end
-        possibilities2
+        result_pz
       end # def __parse
     end # class Grammar
   end # module GorillaGrammar
@@ -249,13 +293,12 @@ end # module Hipe
 
 require 'pp'
 
-def ppp symbol, object=nil, die=nil
+def p symbol, object=nil, die=nil
   unless (symbol.instance_of?(Symbol) || symbol.instance_of?(String))
     die = object
     object = symbol
     symbol = 'YOUR VALUE'
   end
-  
   puts spp(symbol, object)
   if die
     exit
@@ -271,7 +314,7 @@ def spp label, object
   caller.each_with_index do |line,index|
     matches = /`([^']+)'$/.match(line)
     break if (matches.nil?) # almost always the last line of the stack -- the calling file name
-    matched = /(?:\b|_)(?:log|ppp|spp)(?:\b|_)/ =~ matches[1]
+    matched = /(?:\b|_)(?:log|p|spp)(?:\b|_)/ =~ matches[1]
     break unless matched
   end
   m = /^(.+):(\d+)(?::in `(.+)')?$/.match line
@@ -308,10 +351,14 @@ if File.basename($PROGRAM_NAME) == File.basename(__FILE__) && ARGV[0] != 'gorill
       def run argv
         parser = GorillaGrammar::Grammar.new({
           :verbs => {
-            ['show', /^(modified|untracked)$/] => {:passthru=>{:capture_names=>[:which]}}, #* fixme!!!
-            ['add',  /^(both|modified|untracked)$/] => {:passthru=>{:capture_names=>[:which]}},
-            ['help'] => {},
-            ['version'] => {}
+            #['show', /^(modified|untracked)$/] => {:passthru=>{:capture_names=>[:which]}}, #* fixme!!!
+            #['add',  /^(both|modified|untracked)$/] => {:passthru=>{:capture_names=>[:which]}},
+            ['tell', /^(.+)$/, :subject, 'said', :something] => {
+              :names => {1=>:who},
+              :modifiers => {['rather','loudly']=>1}
+            }
+           #['help'] => {},
+           #['version'] => {}
           }
         })
         if (0==ARGV.size || ['--help','-h'].include?(ARGV[0]))        
@@ -320,7 +367,7 @@ if File.basename($PROGRAM_NAME) == File.basename(__FILE__) && ARGV[0] != 'gorill
           ARGV[0] = 'version'
         end
         parse = parser.parse(ARGV) # throws
-        send('execute_'+parse.as_method_name.to_s, parse.name_value_pairs)
+        send('execute_'+parse.as_key.to_s, parse)
       end # def run
 
       def program_name
@@ -331,6 +378,8 @@ if File.basename($PROGRAM_NAME) == File.basename(__FILE__) && ARGV[0] != 'gorill
         puts <<-END.gsub(/^ {8}/, '')
         Helpful little additions to git.
         Usage:
+          #{program_name} info                              Ruby version of Duane Johnson's 
+                                                      script that is similar to svn info
           #{program_name} add  {modified|untracked|both}    Adds all files of that kind
           #{program_name} show {modified|untracked}         Show a preview of what files would
                                                       be added
@@ -346,6 +395,13 @@ if File.basename($PROGRAM_NAME) == File.basename(__FILE__) && ARGV[0] != 'gorill
       def execute_show_which(args)
         ppp :args, args, 1
       end
+      
+      def execute_tell_who_subject_said_something(tree)
+        caps = tree.verb.captures
+        tree.modifiers.each { |mod| caps.merge! mod.captures }
+        puts %{hey #{caps[:who][0]}, #{caps[:subject]} said "#{caps[:something]}"}
+      end
+      
     end # class GitHelper
   end # module Hipe  
   Hipe::GitHelper::new.run(ARGV)
@@ -387,9 +443,9 @@ if File.basename($PROGRAM_NAME) == File.basename(__FILE__) && ARGV[0] == 'gorill
   
   parse_tree = grammar.parse(['to','jim','say','this','word','englefish','really','loudly'])
   
-  ppp :parse_tree, parse_tree 
+  p :parse_tree, parse_tree 
   
 end
 
-# possibilities.to_enum.with_index.select{|e,i| e > 5 }.map{|e,i| i } from manveru sunday 18:08    
+# pz.to_enum.with_index.select{|e,i| e > 5 }.map{|e,i| i } from manveru sunday 18:08    
 # we considered using Diff::LCS.LCS for this but -- we need contiguous matches
