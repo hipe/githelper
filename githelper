@@ -26,11 +26,14 @@ module Hipe
   
   # if this module proves useful it should be moved out of here! 
   module GorillaGrammar
-
-    class UsageFailure < Exception; end  
-
+                                              
+    class UsageFailure < Exception; end    
+    class AmbiguousGrammarUsageFailure < UsageFailure; end
+                            
     class ParseFailure < Exception; end  
-    
+    class UnexpectedEndOfInput < ParseFailure; end
+    class UnexpectedInput < ParseFailure; end
+          
     module Terminal
       def grammar_name
         name
@@ -261,7 +264,7 @@ module Hipe
          end
          shrinkme.compact!
          if (0<shrinkme.size)
-           raise ParseFailure.new(%{I can't make sense of "#{shrinkme.inspect}"})
+           raise ParseFailure.new(%{I can't make sense of #{shrinkme.inspect} -- I wasn't expecting any more input.})
          end
          GorillaParseTree.new(verb_non_terminal, modifier_nts)
        end
@@ -288,10 +291,17 @@ module Hipe
            prev_possibilites = nt_list # for reporting on parse failures
            nt_list = parse_eliminate_possibilities(nt_list, input_list)
            if (nt_list.size == 0 && :return_all != on_ambiguity)
-             if (input_list.size == 0) then s = "Unexpected end of input."
-             else s = %{Unexpected word "#{input_list[0]}". }; end
-             raise ParseFailure.new(%{#{s} Expecting }+
-               %{#{Phrase.describe_expecting(prev_possibilites)}})
+             i1 = prev_possibilites[0][:i2];  # index of the next token to look at in input
+             if ( !(i1.nil?) && i1 > input_list.size-1 )
+               raise UnexpectedEndOfInput.new("Unexpected end of input.  Expecting "+
+                 Phrase.describe_expecting(prev_possibilites)
+               )
+             else      
+               token = input_list[i1.nil? ? 0 : i1]
+               raise UnexpectedInput.new(%{Unexpected word "#{token}". Expecting }+
+                 Phrase.describe_expecting(prev_possibilites)
+               )               
+             end
            elsif (nt_list.find_all{|nt| nt.matched? }.size == nt_list.size)
              if (nt_list.size == 1 ) 
                match = nt_list[0]
@@ -299,12 +309,10 @@ module Hipe
              else
                case on_ambiguity
                  when :get_longest
-                   p nt_list,1
-
-                   lengths = nt_list.map { |x| x[:phrase].length }
+                   lengths = nt_list.map { |x| x.phrase.length }
                    max = lengths.max
                    if (lengths.find_all{|x| x==max}.size > 1)
-                     raise UsageFailure.new(
+                     raise AmbiguousGrammarUsageFailure.new(
                        "Ambiguous grammar and can't find longest match! There is more than one with same length!"
                      )
                    else
@@ -316,7 +324,7 @@ module Hipe
                   match = nt_list # careful
                   break
                 when :fail
-                  raise UsageFailure.new("Ambiguous grammar!")
+                  raise AmbiguousGrammarUsageFailure.new("Ambiguous grammar!")
                 else
                   raise UsageFailure.new(%{invalid "on_ambiguity" value "#{on_ambiguity.inspect}"})
                end
@@ -442,20 +450,30 @@ if File.basename($PROGRAM_NAME) == File.basename(__FILE__) && ARGV[0] != 'gorill
             #   :names => {1=>:who},
             #   :modifiers => {['rather','loudly']=>1}
             # }
-            ['show', /^(modified|untracked)$/] => {:names=>{1=>:which}},
-            ['add',  /^(both|modified|untracked)$/] => {:names=>{1=>:which}},
-            ['info'] => {},
-            ['help'] => {},
-            ['version'] => {}
+            ['alpha','beta','gamma'] => {} ,
+            ['lambda','ringo','star'] => {},
+            ['alpha','beta'] => {}
+            
+            
+            # ['show', /^(modified|untracked)$/] => {:names=>{1=>:which}},
+            # ['add',  /^(both|modified|untracked)$/] => {:names=>{1=>:which}},
+            # ['info'] => {},
+            # ['help'] => {},
+            # ['version'] => {}
           }
         })
-       if (0==ARGV.size || ['--help','-h'].include?(ARGV[0]))        
-         ARGV[0] = 'help'
-       elsif (['-v','--version'].include?(ARGV[0]))
-         ARGV[0] = 'version'
-       end
-        parse = parser.parse(ARGV) # throws
-        send('execute_'+parse.as_key.to_s, parse)
+        if (0==ARGV.size || ['--help','-h'].include?(ARGV[0]))        
+          ARGV[0] = 'help'
+        elsif (['-v','--version'].include?(ARGV[0]))
+          ARGV[0] = 'version'
+        end
+        begin
+          parse = parser.parse(ARGV) # throws
+        rescue GorillaGrammar::ParseFailure => e
+          puts e.message
+        else
+          send('execute_'+parse.as_key.to_s, parse)
+        end
       end # def run
 
       def execute_help args
