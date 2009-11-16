@@ -13,10 +13,240 @@
 #   githelper show both
 #   githelper add both
 #   githelper help
-#   githelper version
 # 
 #  Just for fun, the noun phrases and verbs and adjectives can appear in any order
 #
+#  The parser is way overkill
+#
+#  Wishlist: required verb modifiers.  trim the passthru tree.  utilize ruby 1.9 stuff
+#
+
+module Hipe
+  
+  # if this module proves useful it should be moved out of here! 
+  module GorillaGrammar
+
+    class UsageFailure < Exception; end  
+
+    class ParseFailure < Exception; end  
+  
+    class NonTerminal
+      def initialize data, extra
+        @data = data
+        @extra = extra
+      end
+      
+      def phrase
+        @data[:phrase]
+      end
+      
+      def phrase_to_key list
+        list.map{|x| x.to_s }.join(_).to_sym
+      end
+      
+      # waiting for refactor
+      def capture_names
+        (@extra && @extra[:passthru]) ? 
+          @extra[:passthru][:capture_names].clone :
+          []
+      end
+      
+      def captures
+        return {} if !@extra || !@extra[:passthru]
+        left  = @extra[:passthru][:capture_names]
+        right = @data[:re_captures].flatten
+        Hash[*(left.zip(right).flatten)]
+      end
+      
+    end
+  
+    class GorillaParse
+      def initialize match
+        @data = match
+      end
+            
+      def as_method_name 
+        names = @data[:verb_phrase].capture_names
+        @data[:verb_phrase].phrase.map do |x|
+          if x.instance_of? Regexp
+            names.shift #terrible!
+          else
+            x.to_s 
+          end
+        end.join('_').to_sym
+      end  
+      
+      def name_value_pairs
+        raise Exception.new('implement me') if (@data[:modifiers].count > 0)
+        @data[:verb_phrase].captures
+      end
+
+    end # class
+    
+    class Grammar
+    
+      def initialize grammar
+        @grammar = grammar
+        @on_ambiguity = :fail; # :get_longest, :return_all, :fail
+        @debug_level = 0
+      end # def initialize
+    
+      def parse input_list
+        phrases = @grammar[:verbs].keys
+        @on_ambiguity = :get_longest
+        verb_tree = _parse(phrases,input_list)
+        result = {}
+        matching_verb = @grammar[:verbs][verb_tree[:phrase]]
+        result[:verb_phrase] = NonTerminal.new( verb_tree, matching_verb )
+        result[:modifiers] = [] # we were thinking of making it a hash but why not allow multiple of the same? 
+        if (matching_verb[:passthru])
+          result[:passthru] = matching_verb[:passthru]
+        end
+        if (matching_verb[:modifiers])
+          @on_ambiguity = :return_all
+          # if we wanted to be really anal we would parse the first half and second half separately to avoid interference
+          # but it seems like overkill at this early point. and almost never a big deal unless really ambiguous G's
+          shrinkme = input_list.clone
+          nillify shrinkme, verb_tree[:i1]..verb_tree[:i2]
+          phrases = matching_verb[:modifiers].keys
+          matches = _parse(phrases,shrinkme)
+          matches.each do |match|
+            nillify shrinkme, match[:i1]..match[:i2]
+            result[:modifiers] << NonTerminal.new( match )
+          end
+          if (0<shrinkme.compact!.size)
+            raise ParseFailure.new(%{I can't make sense of "#{shrinkme.inspect}"})
+          end
+        end # end if modifiers existed
+        GorillaParse.new result
+      end
+    
+      def self.to_hash trees
+        
+        ppp :trees, trees, 1
+      end
+    
+      def nillify from_array, range
+        range.each { |x| from_array[x] = nil }
+      end
+
+      def debug(level,puts=false,&block)
+        return if (@debug_level < level)
+        if puts
+          puts yield
+        else 
+          print yield
+        end
+      end
+      
+      def debugs(level,&block)
+        return debug(level, true, &block)
+      end
+    
+      def _parse(phrases,input_list)
+        possibilities = phrases.map do |phrase|
+          {:g     => 0,
+           :i1  => false,
+           :phrase => phrase
+          }
+        end
+        begin
+          prev_possibilities = possibilities
+          possibilities = __parse(possibilities, input_list)
+          if (possibilities.size == 0)
+            ppp prev_possibilities
+            raise ParseFailure.new("parse failure")
+          elsif (possibilities.find_all{|x| x[:matched] }.size == possibilities.size)
+            if (possibilities.size == 1 ) 
+              match = possibilities[0]
+              break;
+            else
+              case @on_ambiguity
+                when :get_longest
+                  lengths = possibilities.map { |x| x[:phrase].length }
+                  max = lengths.max
+                  if (lengths.find_all{|x| x==max}.size > 1)
+                    raise UsageFailure.new(
+                      "Ambiguous grammar and can't find longest match! There is more than one with same length!"
+                    )
+                  else
+                    index = lengths.find_index(max)
+                    match = possibilities[index]
+                    break
+                  end
+               when :return_all
+                 match = possibilities # careful
+                 possibilities.each { |it| clean_node(it) }
+                 break
+               when :fail
+                 raise UsageFailure.new("Ambiguous grammar!")
+               else
+                 raise UsageFailure.new(%{invalid "@on_ambiguity" value "#{@on_ambiguity.inspect}"})
+              end
+            end
+          else # we have at least one ongoing possibility that isn't done
+            #ppp :poss, possibilities
+          end
+        end while true
+        clean_node(match) if (match.instance_of? Hash)
+        if (:return_all==@on_ambiguity && !match.instance_of?(Array))  # ick
+          [match]
+        else 
+          match
+        end
+      end # def parse
+
+      def clean_node(it)
+        it.delete(:g)
+        it.delete(:matched)
+      end
+
+      def __parse(possibilities, input_list)
+        possibilities2 = []      
+        possibilities.each_with_index do |e,i|
+          if e[:matched]
+            possibilities2 << e
+            next
+          end
+          debugs(1){ %{****checking possibility of this phrase: #{e[:phrase].inspect}} }
+          input_list_indexes = e[:i2] ? [e[:i2]] : (0..input_list.size-1).to_a
+          input_list_indexes.each do |i2|
+            e2 = input_list[i2]
+            debug(1){%{checking input word "#{e2}"}}
+            terminal = e[:phrase][e[:g]]
+            debug(1){%{ against terminal symbol #{terminal.inspect} }}
+            if (terminal==e2 || terminal.instance_of?(Symbol) || (terminal.instance_of?(Regexp) && (m=terminal.match(e2))))
+              debug(1){" and adding \n"}
+              p2 = possibilities[i].clone
+              p2[:i1] = i2 unless p2[:i1]
+              if p2[:g] == p2[:phrase].size - 1
+                p2[:matched] = true
+                p2[:i2] = p2[:i1] unless p2[:i2]
+              else
+                p2[:i2] = (p2[:i2]) ? (p2[:i2]+1) : (p2[:i1]+1)
+              end
+              if (terminal.instance_of? Regexp)
+                p2[:re_captures] ||= []
+                p2[:re_captures] << m.captures
+              elsif (terminal.instance_of? Symbol)
+                p2[:captures] ||= {}
+                p2[:captures][terminal] = e2
+              end
+              p2[:g] += 1
+              possibilities2 << p2
+            else
+              debug(1){" and not adding\n"}
+            end
+          end
+        end
+        possibilities2
+      end # def __parse
+    end # class Grammar
+  end # module GorillaGrammar
+end # module Hipe
+
+###### start temporary echo debugging ######
+
 require 'pp'
 
 def ppp symbol, object=nil, die=nil
@@ -66,103 +296,100 @@ def spp label, object
   buff
 end
 
-module Hipe
-  class GorillaGrammarParseFailure < Exception
-  end
-  class GorillaGrammar
-    def initialize grammar
-      #@states = {}
-      #@mode = :token  # :token | :argument
-      #grammar[:verbs].each do |verb_words,value|
-      #  first_word = verb_words.shift
-      #  @states[first_word] ||= {}
-      #  current_node = @states[first_word]
-      #  while (next_word=verb_words.shift)
-      #    current_node[next_word] ||= {}
-      #    current_node = current_node[next_word]
-      #  end
-      #  raise Exception.new("no") if current_node['']
-      #  current_node[''] = '[action]'
-      #end # each verb
-    end # def initialize
-    
-    def parse input_list
-      x = _parse({:branch => @states, :input_list=>input_list})
-      ppp "wtf to do now?", x, 1
-    end
-    
-    def _parse(stuff)
-      common_keys = stuff[:branch].keys & stuff[:input_list]
-      if (common_keys.size == 0)
-        return false
+###### end temporary echo debugging ######
+
+if File.basename($PROGRAM_NAME) == File.basename(__FILE__) && ARGV[0] != 'gorillatest'
+  module Hipe
+    class GitHelper
+      def initialize
+        @version = '0.0.1beta'
       end
-      possibilities = []
-      common_keys.each do |k|
-        thing = { :i => stuff[:input_list].index(k) }
-        thing[:input_list] = stuff[:input_list].clone
-        thing[:input_list].delete(k)
-        thing[:branch] = stuff[:branch][k]
-        possibilities << thing
+      
+      def run argv
+        parser = GorillaGrammar::Grammar.new({
+          :verbs => {
+            ['show', /^(modified|untracked)$/] => {:passthru=>{:capture_names=>[:which]}}, #* fixme!!!
+            ['add',  /^(both|modified|untracked)$/] => {:passthru=>{:capture_names=>[:which]}},
+            ['help'] => {},
+            ['version'] => {}
+          }
+        })
+        if (0==ARGV.size || ['--help','-h'].include?(ARGV[0]))        
+          ARGV[0] = 'help'
+        elsif (['-v','--version'].include?(ARGV[0]))
+          ARGV[0] = 'version'
+        end
+        parse = parser.parse(ARGV) # throws
+        send('execute_'+parse.as_method_name.to_s, parse.name_value_pairs)
+      end # def run
+
+      def program_name
+        File.basename($PROGRAM_NAME)        
       end
-        
-      ppp :pb, possibilities, 1
+      
+      def execute_help args
+        puts <<-END.gsub(/^ {8}/, '')
+        Helpful little additions to git.
+        Usage:
+          #{program_name} add  {modified|untracked|both}    Adds all files of that kind
+          #{program_name} show {modified|untracked}         Show a preview of what files would
+                                                      be added
+          #{program_name} help                              Shows this screen
+          #{program_name} version                           Shows version number
+        END
+      end
+      
+      def execute_version args
+        puts %{#{program_name} version #{@version}}
+      end
+      
+      def execute_show_which(args)
+        ppp :args, args, 1
+      end
+    end # class GitHelper
+  end # module Hipe  
+  Hipe::GitHelper::new.run(ARGV)
+end # if running this file
 
-  #   case common_keys.size
-  #     when 0 then raise GorillaGrammarParseFailure.new("sorry -- couldn't find verb")
-  #     when 1
-  #     else
-  #       
-  #   ppp :ck, common_keys, 1
-  #   
-  #
 
-    end # def parse
-  end # class GorillaGrammar
-end
 
-pp $PROGRAM_NAME
-if File.basename($PROGRAM_NAME) == File.basename(__FILE__)
-  grammar = Hipe::GorillaGrammar.new({
+# in lieu of proper tests -- this is for GorillaGrammar only
+if File.basename($PROGRAM_NAME) == File.basename(__FILE__) && ARGV[0] == 'gorillatest'
+  grammar = Hipe::GorillaGrammar::Grammar.new({
     :verbs => {
-      ['make','this'] => {
-        :modifiers => {
-          ['with','that'] => true, 
-          ['with','the', 'other'] => true
-        } 
-      },
-      ['make','that'] => {
-        :modifiers => {
-          ['now'] => true
-        }
-      },
-#     ['say', 'this', 'word', :this] => {
-#       :modifiers => {
-#         ['to', :who] => true
-#       }
-#     },
-#     ['say', 'something'] => {
-#       :modifiers => { 'xxxx'=>'blah' }
-#     },
-      ['run'] => {
-      }
-    }
-  })
-  pp grammar
-  
+     ['make','this'] => {
+       :modifiers => {
+         ['with','that'] => true, 
+         ['with','the', 'other'] => true
+       } 
+     },
+     ['make','that'] => {
+       :modifiers => {
+         ['now'] => true
+       }
+     },
+     ['say', 'this', 'word', :thiz] => {
+       :modifiers => {
+         ['to', :who] => true,
+         ['really', 'loudly'] => true         
+       }
+     },
+     ['say', 'something'] => {
+       :modifiers => { 'xxxx'=>'blah' }
+     },
+     ['run'] => {
+     
+     }
+   }
+ });
+
   puts "\n\n\n\n"
   
-  parse_tree = grammar.parse(['say','this','word','run'])
-  if false
-    puts "failed 1" if parse_tree != {
-      :verb => :say,
-      :arguments => {
-        :this => 'beavis'
-      }
-    }
-  end
+  parse_tree = grammar.parse(['to','jim','say','this','word','englefish','really','loudly'])
+  
+  ppp :parse_tree, parse_tree 
   
 end
 
-
-
-
+# possibilities.to_enum.with_index.select{|e,i| e > 5 }.map{|e,i| i } from manveru sunday 18:08    
+# we considered using Diff::LCS.LCS for this but -- we need contiguous matches
