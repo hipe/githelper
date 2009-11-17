@@ -69,10 +69,10 @@ module Hipe
       commands:
          help                              Show this screen
          version                           Show version number of this script
-         info                              Show information similar to svn info
+         info                              Similar to svn info (Thanks Duane Johnson!)
          add  {added|modified|untracked|all} [as dry run]
                                             Adds all files of that kind
-         show {added|modified|untracked|all}   List the filenames that match the status.
+         show {added|modified|untracked|all} List the filenames that match the status.
                                           'all' should be equivalent
                                            output of "git --status".
       END
@@ -143,9 +143,9 @@ module Hipe
       print "done "; (print "(with dry run)" if is_dry); print ".\n"
     end
     
-    # This is a port of Xxxxx Xxxxxxx'x shell script (xxxxx.xxxxxxx@gmail.com, License: MIT): 
-    # [link omitted for now, awaiting confirmation]                                       
-    # [link omitted for now, awaiting confirmation]                                  
+    # This is a port of Duane Johnson's shell script (duane D0T johnson AT gmail D0T com, License: MIT): 
+    # http://blog.inquirylabs.com/2008/06/12/git-info-kinda-like-svn-info/
+    # Based on discussion at http://kerneltrap.org/mailarchive/git/2007/11/12/406496
     def execute_info args
       # Find base of git directory
       until Dir.glob('.git').length > 0 do
