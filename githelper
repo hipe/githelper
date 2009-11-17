@@ -16,8 +16,15 @@
 #   githelper add both
 #   githelper help
 # 
-#  (Just for fun, the verb phrases and modifier phrases (none yet in this script) of the grammar
-#   can appear in any order. The parser is way overkill)
+#  Just for fun, the syntax of this command line tool is kind of strange in two ways:
+#
+#  1) instead of --options-like="this" or options like -abc, we just type them inline with the commands
+#   so for example, we don't say "githelper add modified --dry-run" ,
+#   we say "githelper add modified as dry run"
+#  
+#  2) the options can appear before or after the "verb phrase", so in addition to the above we could also say
+#           "githelper as dry run add modified"
+#
 #
 #  Wishlist: required verb modifiers.  utilize ruby 1.9 stuff
                         
@@ -36,7 +43,11 @@ module Hipe
       parser = GorillaGrammar::Grammar.new({
         :verbs => {
           ['show', /^(added|modified|untracked|all)$/] => {:names=>{1=>:which}},
-          ['add',  /^(added|modified|untracked|all)$/] => {:names=>{1=>:which}},
+          ['add',  /^(added|modified|untracked|all)$/] => {:names=>{1=>:which},
+            :modifiers => {
+              ['as','dry','run'] => {}
+            }                       
+          },
           ['info'] => {},
           ['help'] => {},
           ['version'] => {}
@@ -59,13 +70,11 @@ module Hipe
          help                              Show this screen
          version                           Show version number of this script
          info                              Show information similar to svn info
-         add  {added|modified|untracked|all}  Adds all files of that kind
-         show {added|modified|untracked|all}   Show a preview of what files would
-                                           be added.  'all' should be equivalent
-                                           output of "git --status". Warning --
-                                           the name 'show' will probably be 
-                                           changed to be a modifier like 
-                                           "dry run"
+         add  {added|modified|untracked|all} [as dry run]
+                                            Adds all files of that kind
+         show {added|modified|untracked|all}   List the filenames that match the status.
+                                          'all' should be equivalent
+                                           output of "git --status".
       END
     end
 
@@ -108,10 +117,10 @@ module Hipe
     end
     
     def execute_show_which(args)     
-      return execute_add_which(args,true)
+      puts get_file_list_for_add(args) * "\n"
     end
-    
-    def execute_add_which(args, is_dry=false)
+                      
+    def get_file_list_for_add(args)
       which = args[:which][0].to_sym
       tree = parse_status
       if :all == which
@@ -119,18 +128,20 @@ module Hipe
       else
         list = tree[which]
       end
-      list.sort!
-      if (is_dry)
-        puts list * "\n"
-      else
-        list.each do |filename|
-          s = "git add #{filename}"
-          puts s
-          `#{s}`
-        end
-        puts "done."
+      list.sort!.uniq!
+      list
+    end
+    
+    def execute_add_which(args)
+      list = get_file_list_for_add(args)
+      is_dry = args[:as_dry_run]
+      list.each do |filename|
+        s = "git add #{filename}"
+        puts s
+        `#{s}` unless is_dry
       end
-    end 
+      print "done "; (print "(with dry run)" if is_dry); print ".\n"
+    end
     
     # This is a port of Xxxxx Xxxxxxx'x shell script (xxxxx.xxxxxxx@gmail.com, License: MIT): 
     # [link omitted for now, awaiting confirmation]                                       
