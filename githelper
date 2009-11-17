@@ -20,11 +20,166 @@
 #   can appear in any order. The parser is way overkill)
 #
 #  Wishlist: required verb modifiers.  utilize ruby 1.9 stuff
-#
+                        
+
+module Hipe
+  class GitHelper
+    def initialize
+      @version = '0.0.1beta'
+    end
+    def run argv
+      if (0==ARGV.size || ['--help','-h'].include?(ARGV[0]))        
+        ARGV[0] = 'help'
+      elsif (['-v','--version'].include?(ARGV[0]))
+        ARGV[0] = 'version'
+      end      
+      parser = GorillaGrammar::Grammar.new({
+        :verbs => {
+          ['show', /^(added|modified|untracked|all)$/] => {:names=>{1=>:which}},
+          ['add',  /^(added|modified|untracked|all)$/] => {:names=>{1=>:which}},
+          ['info'] => {},
+          ['help'] => {},
+          ['version'] => {}
+       }
+      })
+      begin
+        parse = parser.parse(ARGV) # throws
+      rescue GorillaGrammar::ParseFailure => e
+        puts e.message
+      else
+        send('execute_'+parse.as_key.to_s, parse.captures)
+      end
+    end # def run
+
+    def execute_help args
+      puts <<-END.gsub(/^ {6}/, '')
+      Helpful little additions to git.
+      usage: #{program_name} COMMAND [ARGS]
+      commands:
+         help                              Show this screen
+         version                           Show version number of this script
+         info                              Show information similar to svn info
+         add  {added|modified|untracked|all}  Adds all files of that kind
+         show {added|modified|untracked|all}   Show a preview of what files would
+                                           be added.  'all' should be equivalent
+                                           output of "git --status". Warning --
+                                           the name 'show' will probably be 
+                                           changed to be a modifier like 
+                                           "dry run"
+      END
+    end
+
+    def execute_version args
+      puts %{#{program_name} version #{@version}}
+    end
+                           
+    def parse_status
+      str = `git status`                                        
+      re = %r< 
+        (?:^\#\sOn\sbranch.*$\n)
+        (?:
+          (?:^\#\sChanges\sto\sbe\scommitted:$\n)
+          (?:^\#\s+[[:print:]]+$\n)+
+          (?:^\#$\n)
+          ((?:^\#\s+(?:new\sfile|modified):\s+.+$\n)+)
+          (?:^\#$\n)                       
+        )?
+        (?:
+          (?:^\#\sChanged\sbut\snot\supdated:$\n)
+          (?:^\#\s+[[:print:]]+$\n)+
+          (?:^\#$\n)
+          ((?:^\#\s+modified:\s+.+$\n)+)
+          (?:^\#$\n)                       
+        )?  
+        (?:
+          (?:^\#\sUntracked\sfiles:$\n)
+          (?:^\#\s+[[:print:]]+$\n)+
+          (?:^\#$\n)
+          ((?:^\#\s+.+$\n)+)
+        )?
+        >ix
+      raise Exception.new("regexp failure!") unless (matches = re.match str)  
+      caps = matches.captures                                                      
+      {
+        :added     =>  caps[0] ? caps[0].scan(/^\#\t(?:new file|modified): +(.*)$\n/).flatten : [],
+        :modified  =>  caps[1] ? caps[1].scan(/^\#\tmodified: +(.*)$\n/).flatten : [],
+        :untracked =>  caps[2] ? caps[2].scan(/^\#\t(.*)$\n/).flatten            : []
+      }
+    end
+    
+    def execute_show_which(args)     
+      return execute_add_which(args,true)
+    end
+    
+    def execute_add_which(args, is_dry=false)
+      which = args[:which][0].to_sym
+      tree = parse_status
+      if :all == which
+        list = tree.values.flatten
+      else
+        list = tree[which]
+      end
+      list.sort!
+      if (is_dry)
+        puts list * "\n"
+      else
+        list.each do |filename|
+          s = "git add #{filename}"
+          puts s
+          `#{s}`
+        end
+        puts "done."
+      end
+    end 
+    
+    # This is a port of Xxxxx Xxxxxxx'x shell script (xxxxx.xxxxxxx@gmail.com, License: MIT): 
+    # [link omitted for now, awaiting confirmation]                                       
+    # [link omitted for now, awaiting confirmation]                                  
+    def execute_info args
+      # Find base of git directory
+      until Dir.glob('.git').length > 0 do
+        if '/'==Dir.pwd   
+          puts "can't find .git directory this or any parent folder!"
+          exit
+        end
+        Dir.chdir('..')
+      end
+
+      puts "(in "+Dir.pwd+')'
+
+      # Show various information about this git directory
+      puts "== Remote URL: "
+      puts `git remote -v`
+
+      puts "== Remote Branches: "
+      puts `git branch -r`
+
+      puts "== Local Branches:"
+      puts `git branch`
+      puts "\n"
+
+      puts "== Configuration (.git/config)"
+      File.open('.git/config'){|fh| puts fh.read }
+      puts "\n"
+
+      puts "== Most Recent Commit"
+      puts `git log --max-count=1`
+      puts "\n"
+
+      puts "Type 'git log' for more commits, or 'git show' for full commit details."
+      
+    end
+   
+    def program_name
+      File.basename($PROGRAM_NAME)        
+    end
+  end # class GitHelper
+end # module Hipe
+
 
 module Hipe
   
-  # if this module proves useful it should be moved out of here! 
+  # if this module proves useful it will be moved out of here! 
   module GorillaGrammar
                                               
     class UsageFailure < Exception; end    
@@ -128,6 +283,10 @@ module Hipe
       end
       
       attr_accessor :phrase
+                            
+      def as_key
+        capture_names.map{|x|x.to_s}.join('_').to_sym      
+      end
       
       def modifiers
         if @modifiers
@@ -224,12 +383,13 @@ module Hipe
       attr_reader :verb, :modifiers
             
       def as_key
-        @verb.capture_names.map{|x|x.to_s}.join('_').to_sym
+        @verb.as_key
       end  
       
       def captures
-        ret = {}
-        ret[@verb.as_key] = @verb.captures
+        #ret = {}
+        #ret[@verb.as_key] = @verb.captures
+        ret = @verb.captures
         @modifiers.each do |mod|
           ret[mod.as_key] = mod.captures
         end
@@ -340,6 +500,7 @@ module Hipe
          end
        end # def parse
 
+       # 'pz' stands for "possibilities" -- it started to hurt my fingers and eyes writing and reading it                         
        def parse_eliminate_possibilities(pz, input_list)
          result_pz = []      
          pz.each do |nt|
@@ -378,7 +539,14 @@ module Hipe
  # second half separately to avoid interference but it seems like overkill at this early point.
  # and almost never a big deal unless really ambiguous G's
     
- 
+                       
+if File.basename($PROGRAM_NAME) == File.basename(__FILE__) && ARGV[0] != 'gorillatest'
+
+  Hipe::GitHelper::new.run(ARGV)
+end # if running this file
+
+
+
 ###### start temporary echo debugging ######
 
 require 'pp'
@@ -431,170 +599,74 @@ end
 
 ###### end temporary echo debugging ######
 
-if File.basename($PROGRAM_NAME) == File.basename(__FILE__) && ARGV[0] != 'gorillatest'
-  module Hipe
-    class GitHelper
-      def initialize
-        @version = '0.0.1beta'
-      end
-      
-      def run argv
-        parser = GorillaGrammar::Grammar.new({
-          :verbs => {
-            #['do','this'] => {
-            #  :modifiers => {
-            #    ['with','that'] => {}
-            #  }
-            #}
-            # ['tell', /^(.+)$/, :subject, 'said', :something] => {
-            #   :names => {1=>:who},
-            #   :modifiers => {['rather','loudly']=>1}
-            # }
-            ['alpha','beta','gamma'] => {} ,
-            ['lambda','ringo','star'] => {},
-            ['alpha','beta'] => {}
-            
-            
-            # ['show', /^(modified|untracked)$/] => {:names=>{1=>:which}},
-            # ['add',  /^(both|modified|untracked)$/] => {:names=>{1=>:which}},
-            # ['info'] => {},
-            # ['help'] => {},
-            # ['version'] => {}
-          }
-        })
-        if (0==ARGV.size || ['--help','-h'].include?(ARGV[0]))        
-          ARGV[0] = 'help'
-        elsif (['-v','--version'].include?(ARGV[0]))
-          ARGV[0] = 'version'
-        end
-        begin
-          parse = parser.parse(ARGV) # throws
-        rescue GorillaGrammar::ParseFailure => e
-          puts e.message
-        else
-          send('execute_'+parse.as_key.to_s, parse)
-        end
-      end # def run
-
-      def execute_help args
-        puts <<-END.gsub(/^ {8}/, '')
-        Helpful little additions to git.
-        Usage:
-          #{program_name} info                              Ruby version of Xxxxx Xxxxxxx'x 
-                                                      script that is similar to svn info
-          #{program_name} add  {modified|untracked|both}    Adds all files of that kind
-          #{program_name} show {modified|untracked}         Show a preview of what files would
-                                                      be added
-          #{program_name} help                              Show this screen
-          #{program_name} version                           Show version number of this script
-        END
-      end
-
-      def program_name
-        File.basename($PROGRAM_NAME)        
-      end
-      
-      def execute_do_this args
-        puts "we are doing this with: "+args.captures.inspect
-        pp args
-      end
-      
-      def execute_version args
-        puts %{#{program_name} version #{@version}}
-      end
-      
-      def execute_show_which(args)
-        ppp :args, args, 1
-      end
-      
-      # This is a port of Xxxxx Xxxxxxx'x shell script (xxxxx.xxxxxxx@gmail.com, License: MIT): 
-      # [link omitted for now, awaiting confirmation]                                       
-      # [link omitted for now, awaiting confirmation]                                  
-      def execute_info args
-        # Find base of git directory
-        until Dir.glob('.git').length > 0 do
-          if '/'==Dir.pwd   
-            puts "can't find .git directory this or any parent folder!"
-            exit
-          end
-          Dir.chdir('..')
-        end
-
-        puts "(in "+Dir.pwd+')'
-
-        # Show various information about this git directory
-        puts "== Remote URL: "
-        puts `git remote -v`
-
-        puts "== Remote Branches: "
-        puts `git branch -r`
-
-        puts "== Local Branches:"
-        puts `git branch`
-        puts "\n"
-
-        puts "== Configuration (.git/config)"
-        File.open('.git/config'){|fh| puts fh.read }
-        puts "\n"
-
-        puts "== Most Recent Commit"
-        puts `git log --max-count=1`
-        puts "\n"
-
-        puts "Type 'git log' for more commits, or 'git show' for full commit details."
-        
-      end
-      
-      def execute_tell_who_subject_said_something(tree)
-        caps = tree.verb.captures
-        tree.modifiers.each { |mod| caps.merge! mod.captures }
-        puts %{hey #{caps[:who][0]}, #{caps[:subject]} said "#{caps[:something]}"}
-      end
-      
-    end # class GitHelper
-  end # module Hipe  
-  Hipe::GitHelper::new.run(ARGV)
-end # if running this file
-
-
 
 # in lieu of proper tests -- this is for GorillaGrammar only
-if File.basename($PROGRAM_NAME) == File.basename(__FILE__) && ARGV[0] == 'gorillatest'
-  grammar = Hipe::GorillaGrammar::Grammar.new({
-    :verbs => {
-     ['make','this'] => {
-       :modifiers => {
-         ['with','that'] => true, 
-         ['with','the', 'other'] => true
-       } 
-     },
-     ['make','that'] => {
-       :modifiers => {
-         ['now'] => true
-       }
-     },
-     ['say', 'this', 'word', :thiz] => {
-       :modifiers => {
-         ['to', :who] => true,
-         ['really', 'loudly'] => true         
-       }
-     },
-     ['say', 'something'] => {
-       :modifiers => { ['xxxx']=>true }
-     },
-     ['run'] => {
-     
-     }
-   }
- });
-
-  puts "\n\n\n\n"
-  
-  parse_tree = grammar.parse(['to','jim','say','this','word','englefish','really','loudly'])
-  
-  p :parse_tree, parse_tree 
-  
-end
-
+# if File.basename($PROGRAM_NAME) == File.basename(__FILE__) && ARGV[0] == 'gorillatest'
+#   grammar = Hipe::GorillaGrammar::Grammar.new({
+#     :verbs => {
+#      ['make','this'] => {
+#        :modifiers => {
+#          ['with','that'] => true, 
+#          ['with','the', 'other'] => true
+#        } 
+#      },
+#      ['make','that'] => {
+#        :modifiers => {
+#          ['now'] => true
+#        }
+#      },
+#      ['say', 'this', 'word', :thiz] => {
+#        :modifiers => {
+#          ['to', :who] => true,
+#          ['really', 'loudly'] => true         
+#        }
+#      },
+#      ['say', 'something'] => {
+#        :modifiers => { ['xxxx']=>true }
+#      },
+#      ['run'] => {
+#      
+#      }
+#    }
+#  });
+# 
+#   puts "\n\n\n\n"
+#   
+#   parse_tree = grammar.parse(['to','jim','say','this','word','englefish','really','loudly'])
+#   
+#   p :parse_tree, parse_tree          
+# 
+#   #['do','this'] => {
+#   #  :modifiers => {
+#   #    ['with','that'] => {}
+#   #  }
+#   #}
+#   # ['tell', /^(.+)$/, :subject, 'said', :something] => {
+#   #   :names => {1=>:who},
+#   #   :modifiers => {['rather','loudly']=>1}
+#   # }
+#   # ['alpha','beta','gamma'] => {} ,
+#   # ['lambda','ringo','star'] => {},
+#   # ['alpha','beta'] => {}
+#   
+#       
+#                  
+#       ######################### Testing Methods #############################
+#       def execute_do_this args
+#         puts "we are doing this with: "+args.captures.inspect
+#         pp args
+#       end
+#       def execute_tell_who_subject_said_something(tree)
+#         caps = tree.verb.captures
+#         tree.modifiers.each { |mod| caps.merge! mod.captures }
+#         puts %{hey #{caps[:who][0]}, #{caps[:subject]} said "#{caps[:something]}"}
+#       end
+#       ######################### End Testing Methods ##########################
+#       
+#   
+#   
+#   
+# end
+# 
 # pz.to_enum.with_index.select{|e,i| e > 5 }.map{|e,i| i } from manveru sunday 18:08    
 # we considered using Diff::LCS.LCS for this but -- we need contiguous matches
