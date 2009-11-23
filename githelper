@@ -45,7 +45,8 @@ module Hipe
           ['show', /^(added|modified|untracked|all)$/] => {:names=>{1=>:which}},
           ['add',  /^(added|modified|untracked|all)$/] => {:names=>{1=>:which},
             :modifiers => {
-              ['as','dry','run'] => {}
+              ['as','dry','run'] => {},  # @todo waiting for full on test suite and separate library
+              ['dry'] =>            {}              
             }                       
           },
           ['info'] => {},
@@ -70,7 +71,7 @@ module Hipe
          help                              Show this screen
          version                           Show version number of this script
          info                              Similar to svn info (Thanks Duane Johnson!)
-         add  {added|modified|untracked|all} [as dry run]
+         add  {added|modified|untracked|all} [[as] dry [run]]
                                             Adds all files of that kind
          show {added|modified|untracked|all} List the filenames that match the status.
                                           'all' should be equivalent
@@ -86,11 +87,13 @@ module Hipe
       str = `git status`                                        
       re = %r< 
         (?:^\#\sOn\sbranch.*$\n)
+        (?:^\#\sYour\sbranch\sis\sahead[^\n]+\n\#\n)?
+        (?:^\#\s^\#\sInitial\sCommit\n\#\s)?
         (?:
           (?:^\#\sChanges\sto\sbe\scommitted:$\n)
           (?:^\#\s+[[:print:]]+$\n)+
           (?:^\#$\n)
-          ((?:^\#\s+(?:new\sfile|modified):\s+.+$\n)+)
+          ((?:^\#\s+(?:new\sfile|modified|deleted|renamed):\s+.+$\n)+)
           (?:^\#$\n)                       
         )?
         (?:
@@ -105,15 +108,16 @@ module Hipe
           (?:^\#\s+[[:print:]]+$\n)+
           (?:^\#$\n)
           ((?:^\#\s+.+$\n)+)
-        )?
+        )?        
         >ix
       raise Exception.new("regexp failure!") unless (matches = re.match str)  
-      caps = matches.captures                                                      
-      {
+      caps = matches.captures       
+      ret = {
         :added     =>  caps[0] ? caps[0].scan(/^\#\t(?:new file|modified): +(.*)$\n/).flatten : [],
         :modified  =>  caps[1] ? caps[1].scan(/^\#\tmodified: +(.*)$\n/).flatten : [],
         :untracked =>  caps[2] ? caps[2].scan(/^\#\t(.*)$\n/).flatten            : []
       }
+      ret
     end
     
     def execute_show_which(args)     
@@ -134,7 +138,7 @@ module Hipe
     
     def execute_add_which(args)
       list = get_file_list_for_add(args)
-      is_dry = args[:as_dry_run]
+      is_dry = args[:as_dry_run] || args[:dry]
       list.each do |filename|
         s = "git add #{filename}"
         puts s
