@@ -93,14 +93,14 @@ module Hipe
           (?:^\#\sChanges\sto\sbe\scommitted:$\n)
           (?:^\#\s+[[:print:]]+$\n)+
           (?:^\#$\n)
-          ((?:^\#\s+(?:new\sfile|modified|deleted|renamed):\s+.+$\n)+)
+          ((?:^\#\s+(?:new\sfile|modified|deleted|renamed|copied|[a-z ]+):\s+.+$\n)+)
           (?:^\#$\n)                       
         )?
         (?:
           (?:^\#\sChanged\sbut\snot\supdated:$\n)
           (?:^\#\s+[[:print:]]+$\n)+
           (?:^\#$\n)
-          ((?:^\#\s+modified:\s+.+$\n)+)
+          ((?:^\#\s+(?:modified|deleted):\s+.+$\n)+)
           (?:^\#$\n)                       
         )?  
         (?:
@@ -117,6 +117,9 @@ module Hipe
         :modified  =>  caps[1] ? caps[1].scan(/^\#\tmodified: +(.*)$\n/).flatten : [],
         :untracked =>  caps[2] ? caps[2].scan(/^\#\t(.*)$\n/).flatten            : []
       }
+      require 'pp'
+      pp ret
+      exit
       ret
     end
     
