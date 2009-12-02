@@ -1,6 +1,5 @@
 #!/usr/bin/env ruby
 require 'rubygems'
-require 'ruby-debug'
 require 'hipe-gorillagrammar'
 require 'hipe-gorillagrammar/extensions/syntax'
 

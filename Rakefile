@@ -17,10 +17,11 @@ begin
     gem.email = "mark dot meves at gmail dot com"
     gem.homepage = "http://github.com/hipe/hipe-githelper"
     gem.authors = ["Mark Meves"]
-    gem.add_development_dependency "rspec", ">= 1.2.9"
-    gem.add_development_dependency "yard", ">= 0"
-    gem.add_development_dependency "cucumber", ">= 0"
-#    gem.bindir = 'bin'
+    gem.add_development_dependency "bacon", ">= 1.1.0"
+    gem.add_dependency "hipe-gorillagrammar", ">= 0.0.1"
+    #gem.add_development_dependency "rspec", ">= 1.2.9"
+    # gem.add_development_dependency "yard", ">= 0"
+    # gem.add_development_dependency "cucumber", ">= 0"
     # gem is a Gem::Specification... see http://www.rubygems.org/read/chapter/20 for additional settings
   end
   Jeweler::GemcutterTasks.new
