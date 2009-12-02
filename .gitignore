@@ -3,4 +3,3 @@ coverage
 wtfami
 tmp.*
 pkg
-*.gemspec
