@@ -1,0 +1,8 @@
+== 0.0.1 / 2009-12-02
+* now depends on gorilla-grammar gem, more robust parsing
+* different, simplified syntax
+* 100% C1 testing code coverage w/ rcov
+* tried several differnent automated testing platforms. settled on bacon
+
+== 0.0.0 / 2009-11-??
+* standalone version, no dependencies.  hackish parser

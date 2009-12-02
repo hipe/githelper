@@ -1,0 +1,27 @@
+# On branch master
+# Changes to be committed:
+#   (use "git reset HEAD <file>..." to unstage)
+#
+#	modified:   lib/hipe-gorillagrammar.rb
+#	modified:   spec/parsing_spec.rb
+#	deleted:    spec/unparse_spec.rb
+#
+# Changed but not updated:
+#   (use "git add <file>..." to update what will be committed)
+#   (use "git checkout -- <file>..." to discard changes in working directory)
+#
+#	modified:   History.txt
+#	modified:   README.txt
+#	modified:   lib/hipe-gorillagrammar.rb
+#	modified:   spec/parsing_spec.rb
+#	modified:   spec/sequence_spec.rb
+#	modified:   spec/shorthand_spec.rb
+#
+# Untracked files:
+#   (use "git add <file>..." to include in what will be committed)
+#
+#	lame
+#	oh.rb
+#	spec/FOCUS
+#	spec/parse_tree_spec.rb
+#	spec/symbol_reference_spec.rb

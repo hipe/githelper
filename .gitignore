@@ -1,0 +1,6 @@
+.DS_Store
+coverage
+wtfami
+tmp.*
+pkg
+*.gemspec
