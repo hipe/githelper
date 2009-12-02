@@ -27,6 +27,7 @@ Gem::Specification.new do |s|
      "VERSION",
      "bin/githelper",
      "example1.git.status",
+     "hipe-githelper.gemspec",
      "lib/hipe-githelper.rb",
      "tasks/bacon.rake_",
      "test/argv.rb",
