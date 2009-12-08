@@ -64,7 +64,7 @@ module Hipe
         buffer << self.class.wordwrap(@desc,col2width).gsub(/$\n/,"\n"+' '*col1width)
         buffer
       end
-      def self.wordwrap text, line_width  # thansks rails
+      def self.wordwrap text, line_width  # thanks rails
         text.split("\n").collect do |line|
           line.length > line_width ? line.gsub(/(.{1,#{line_width}})(\s+|$)/, "\\1\n").strip : line
         end * "\n"
