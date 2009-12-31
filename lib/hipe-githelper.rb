@@ -2,13 +2,17 @@
 require 'rubygems'
 require 'hipe-gorillagrammar'
 require 'hipe-gorillagrammar/extensions/syntax'
+require 'ruby-debug'
+require 'open3'
 
 
-# This puppy is intended to be a standalone command line script written in ruby
-# with useful features that are not out-of-the-box available for git -- Features like
+# This puppy started out as a standalone command line script written in ruby
+# with features that i thought were not out-of-the-box available for git -- Features like
 # "add all files that haven't been added yet" or "add all files that have been modified"
-# or "do an equivalent of svn-info.".  If you use this a lot, it is recommended that you do something like 
-#   "alias gh='githelper' in your ~/.bash_profile"
+# or "do an equivalent of svn-info.".   after i finished it i we realized that some of these 
+# were builtin command-line options, because for some dumb reason i never rtfm.
+#
+# At this point this is as much an experiment in natural language processing as it is a tool for git.
 #
 # For example:
 #   githelper info
@@ -16,17 +20,7 @@ require 'hipe-gorillagrammar/extensions/syntax'
 #   githelper add both and delete deleted as dry run
 #   githelper help
 # 
-#  Just for fun, the syntax of this command line tool is kind of strange in two ways:
-#
-#  1) instead of --options-like="this" or options like -abc, we just type them inline with the commands
-#   so for example, we don't say "githelper add modified --dry-run" ,
-#   we say "githelper add modified as dry run"
-#  
-#  2) the options can appear before or after the "verb phrase", so in addition to the above we could also say
-#           "githelper as dry run add modified"
-#
-#
-#  Wishlist: required verb modifiers.  utilize ruby 1.9 stuff
+#  The syntax uses an experimental grammar that attempts to sound a bit like natural language.
                         
 
 module Hipe
@@ -105,11 +99,13 @@ module Hipe
       :help_command    =~ 'help'
       :info_command    =~ 'info'
       :version_command =~ 'version'
-      :delete_command  =~ ['delete',zero_or_one('deleted')]
+      :delete_command  =~ ['delete',zero_or_one('deleted')] # @todo bug
       :add_command     =~ ['add',one('untracked','modified','both')]
-      :command         =~ :add_command | :delete_command | :help_command | 
-                          :version_command | :info_command
+      :whitespace_command =~ ['ws'] # @todo,zero_or_one('cached'), zero_or_one(['fix','it'])]
+      :ws2_command      =~ ['ws2']
       :dry             =~ zero_or_one([zero_or_one('as'),'dry',zero_or_one('run')])                          
+      :command           =~ :whitespace_command | :help_command | :info_command | :version_command |
+                         :delete_command | :add_command | :ws2_command
       :argv            =~ [:command,zero_or_more(['and',:command]),:dry]
     }
     
@@ -158,11 +154,39 @@ module Hipe
       else
         commands = tree.recurse {|x| (x.name.to_s =~ /_command$/) ? [x] : [] }
         dry      = tree.recurse {|x| (x.name.to_s =~ /dry/) ? [x] : [] }
-        commands.each do |x| 
-          send(x.name.to_s.match(/^(.+)_command$/).captures[0],[x,dry]) 
+        if commands.size == 0
+          @out.puts "Hmm... no commands found from parse tree"
+        else
+          commands.each do |x| 
+            send(x.name.to_s.match(/^(.+)_command$/).captures[0],[x,dry]) 
+          end
         end
       end
       @out      
+    end
+    
+    command :ws2
+    def ws2(args)
+      whitespace :hack
+    end
+    
+    command :whitespace, %{a wrapper around git diff --check [--cached] that pipes to awk }<<
+      %{if you specify "fix it"}
+    def whitespace args
+      files = nil
+      command = (args == :hack) ? ['git','diff', '--cached','--check'] : ['git','diff', '--check']      
+      Open3.popen3(*command) do |sin, sout, serr|
+        out = sout.read.strip
+        err = serr.read.strip
+        if err.length > 0
+          @out << err
+          return
+        end
+        files = out.scan(/^([^\+].*):\d+: trailing whitespace\./).map{|x| x[0]}.uniq
+      end
+      @out.puts command * ' '
+      @out.puts files * "\n"
+      @out.puts %{sed -i '' 's/ *$//g' } << (files * ' ')
     end
 
     command :help, "show this screen"
