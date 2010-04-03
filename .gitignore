@@ -3,3 +3,5 @@ coverage
 wtfami
 tmp.*
 pkg
+*.gemspec
+hipe-githelper-*

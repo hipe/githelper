@@ -14,11 +14,11 @@ begin
     gem.name = "hipe-githelper"
     gem.summary = %Q{little convenience methods for git}
     gem.description = %Q{command-line convenience methods for git}
-    gem.email = "mark dot meves at gmail dot com"
+    gem.email = "chip.malice@gmail.com"
     gem.homepage = "http://github.com/hipe/hipe-githelper"
-    gem.authors = ["Mark Meves"]
+    gem.authors = ["Chip Malice"]
     gem.add_development_dependency "bacon", ">= 1.1.0"
-    gem.add_dependency "hipe-gorillagrammar", ">= 0.0.1"
+    gem.add_dependency "hipe-gorillagrammar", ">= 0.0.0"
     #gem.add_development_dependency "rspec", ">= 1.2.9"
     # gem.add_development_dependency "yard", ">= 0"
     # gem.add_development_dependency "cucumber", ">= 0"
@@ -63,6 +63,18 @@ rescue LoadError
   task :yardoc do
     abort "YARD is not available. In order to run yardoc, you must: sudo gem install yard"
   end
+end
+
+
+desc "hack turns the installed gem into a symlink to this directory"
+
+task :hack do
+  kill_path = %x{gem which hipe-githelper}
+  kill_path = File.dirname(File.dirname(kill_path))
+  new_name  = File.dirname(kill_path)+'/ok-to-erase-'+File.basename(kill_path)
+  FileUtils.mv(kill_path, new_name, :verbose => 1)
+  this_path = File.dirname(__FILE__)
+  FileUtils.ln_s(this_path, kill_path, :verbose => 1)
 end
 
 Dir['tasks/*.rake'].each{|f| import(f) }
