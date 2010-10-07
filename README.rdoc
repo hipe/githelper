@@ -1,6 +1,20 @@
 = hipe-githelper
 
-little convenience methods for git
+Githelper is Dead! (Long live githelper!)
+
+The only remaining this i ever used this for (stripping whitespace from all)
+
+(little convenience methods for git.)
+
+This puppy started out as a standalone command line script written in ruby
+with features that i thought were not out-of-the-box available for git -- Features like
+"add all files that haven't been added yet" or "add all files that have been modified"
+or "do an equivalent of svn-info.".   after i finished it i we realized that some of these
+were builtin command-line options, because for some dumb reason i never rtfm.
+
+At this point this is as much an experiment in natural language processing as it is a tool for git.
+
+
 
 == Note on Patches/Pull Requests
  
